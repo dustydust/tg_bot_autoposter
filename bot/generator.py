@@ -97,6 +97,9 @@ async def generate_image_prompt(
 
 async def generate_image(client: AsyncOpenAI, prompt: str) -> str:
     """Returns a URL of the generated image."""
+    if not (prompt and prompt.strip()):
+        prompt = "A professional abstract illustration suitable for a blog post"
+        logger.warning("Empty image prompt, using fallback")
     resp = await client.images.generate(
         model=IMAGE_MODEL,
         prompt=prompt,
