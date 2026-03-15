@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -80,9 +79,11 @@ async def cb_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     try:
         if post.get("image_path"):
-            await context.bot.send_photo(
+            from bot.utils import send_photo_with_caption
+            await send_photo_with_caption(
+                bot=context.bot,
+                photo_path=post["image_path"],
                 chat_id=channel,
-                photo=Path(post["image_path"]),
                 caption=post["text"],
                 parse_mode="HTML",
             )
@@ -101,8 +102,11 @@ async def cb_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await db.publish_post(post_id)
 
     try:
+        pub_caption = f"✅ <b>Опубликовано</b>\n\n{post['text']}"
+        if len(pub_caption) > 1024:
+            pub_caption = pub_caption[:1000] + "\n\n… (обрезано)"
         await query.edit_message_caption(
-            caption=f"✅ <b>Опубликовано</b>\n\n{post['text']}",
+            caption=pub_caption,
             parse_mode="HTML",
             reply_markup=None,
         )
@@ -182,11 +186,14 @@ async def cb_regenerate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     keyboard = moderation_keyboard(post_id)
 
     if post.get("image_path"):
-        sent = await query.message.reply_photo(
-            photo=Path(post["image_path"]),
+        from bot.utils import send_photo_with_caption
+        sent = await send_photo_with_caption(
+            bot=context.bot,
+            photo_path=post["image_path"],
             caption=post["text"],
             parse_mode="HTML",
             reply_markup=keyboard,
+            reply_to_message=query.message,
         )
     else:
         sent = await query.message.reply_text(
@@ -237,11 +244,14 @@ async def cb_regen_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     post = await db.get_post(post_id)
     keyboard = moderation_keyboard(post_id)
 
-    sent = await query.message.reply_photo(
-        photo=Path(post["image_path"]),
+    from bot.utils import send_photo_with_caption
+    sent = await send_photo_with_caption(
+        bot=context.bot,
+        photo_path=post["image_path"],
         caption=post["text"],
         parse_mode="HTML",
         reply_markup=keyboard,
+        reply_to_message=query.message,
     )
     await db.update_post(post_id, admin_message_id=sent.message_id)
 
@@ -273,11 +283,14 @@ async def recv_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     keyboard = moderation_keyboard(post_id)
 
     if post.get("image_path"):
-        sent = await update.message.reply_photo(
-            photo=Path(post["image_path"]),
+        from bot.utils import send_photo_with_caption
+        sent = await send_photo_with_caption(
+            bot=context.bot,
+            photo_path=post["image_path"],
             caption=post["text"],
             parse_mode="HTML",
             reply_markup=keyboard,
+            reply_to_message=update.message,
         )
     else:
         sent = await update.message.reply_text(

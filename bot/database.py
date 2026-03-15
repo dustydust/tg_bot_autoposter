@@ -142,3 +142,9 @@ class Database:
         )
         rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def delete_all_posts(self) -> int:
+        """Delete all posts. Returns the number of deleted rows."""
+        cur = await self.db.execute("DELETE FROM posts")
+        await self.db.commit()
+        return cur.rowcount  # type: ignore[return-value]

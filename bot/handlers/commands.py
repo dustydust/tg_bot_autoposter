@@ -53,11 +53,13 @@ def register(app, allowed_ids: frozenset[int]):
     app.add_handler(CommandHandler("help", auth(cmd_help)))
     app.add_handler(CommandHandler("generate", auth(cmd_generate)))
     app.add_handler(CommandHandler("history", auth(cmd_history)))
+    app.add_handler(CommandHandler("clear_history", auth(cmd_clear_history)))
     app.add_handler(CommandHandler("settings", auth(cmd_settings)))
     app.add_handler(CommandHandler("cancel", auth(cmd_cancel)))
 
     app.add_handler(CallbackQueryHandler(auth(cb_edit_setting), pattern=r"^set:"))
     app.add_handler(CallbackQueryHandler(auth(cb_context_count), pattern=r"^ctx:"))
+    app.add_handler(CallbackQueryHandler(auth(cb_clear_history_confirm), pattern=r"^clearhistory:(yes|no)$"))
 
     # Catch free-text replies used for setting edits.
     # This must be added AFTER callback/command handlers and AFTER
@@ -79,6 +81,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/generate — сгенерировать новый пост\n"
         "/settings — настройки бота\n"
         "/history — последние посты\n"
+        "/clear_history — сбросить историю\n"
         "/help — справка",
         parse_mode="HTML",
     )
@@ -90,6 +93,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/generate — создать черновик поста (текст + картинка)\n"
         "/settings — просмотр и изменение настроек\n"
         "/history — последние 5 опубликованных постов\n"
+        "/clear_history — сбросить историю постов\n"
         "/cancel — отменить текущее действие\n"
         "/help — эта справка",
         parse_mode="HTML",
@@ -119,11 +123,14 @@ async def cmd_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await msg.delete()
 
     if post.get("image_path"):
-        sent = await update.message.reply_photo(
-            photo=Path(post["image_path"]),
+        from bot.utils import send_photo_with_caption
+        sent = await send_photo_with_caption(
+            bot=context.bot,
+            photo_path=post["image_path"],
             caption=post["text"],
             parse_mode="HTML",
             reply_markup=keyboard,
+            reply_to_message=update.message,
         )
     else:
         sent = await update.message.reply_text(
@@ -149,6 +156,32 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         date = (p["published_at"] or p["created_at"] or "")[:10]
         lines.append(f"• <i>{date}</i> — {preview}…")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_clear_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Да, сбросить", callback_data="clearhistory:yes"),
+            InlineKeyboardButton("❌ Отмена", callback_data="clearhistory:no"),
+        ],
+    ])
+    await update.message.reply_text(
+        "Сбросить всю историю постов? Это удалит все записи (черновики, опубликованные, отклонённые). "
+        "Контекст для генерации будет пустым.",
+        reply_markup=keyboard,
+    )
+
+
+async def cb_clear_history_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split(":")[1]
+    if action == "no":
+        await query.edit_message_text("Отменено.")
+        return
+    db = _get_deps(context)[0]
+    count = await db.delete_all_posts()
+    await query.edit_message_text(f"✅ История сброшена. Удалено постов: {count}")
 
 
 # ── /settings ─────────────────────────────────────────────────

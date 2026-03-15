@@ -58,9 +58,11 @@ async def _scheduled_generate(context: ContextTypes.DEFAULT_TYPE) -> None:
     for uid in allowed_ids:
         try:
             if post.get("image_path"):
-                sent = await context.bot.send_photo(
+                from bot.utils import send_photo_with_caption
+                sent = await send_photo_with_caption(
+                    bot=context.bot,
+                    photo_path=post["image_path"],
                     chat_id=uid,
-                    photo=Path(post["image_path"]),
                     caption=post["text"],
                     parse_mode="HTML",
                     reply_markup=keyboard,
