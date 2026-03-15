@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    CallbackQueryHandler,
+    ConversationHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from bot.database import Database
+from bot.generator import generate_post
+from bot.handlers.middleware import authorized_only
+
+logger = logging.getLogger(__name__)
+
+WAITING_EDIT_TEXT = 50
+
+
+def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
+    return context.bot_data["db"]
+
+
+def register(app, allowed_ids: frozenset[int]):
+    """Register moderation callback handlers."""
+    auth = authorized_only(allowed_ids)
+
+    app.add_handler(CallbackQueryHandler(auth(cb_publish), pattern=r"^pub:\d+$"))
+    app.add_handler(CallbackQueryHandler(auth(cb_reject), pattern=r"^reject:\d+$"))
+    app.add_handler(CallbackQueryHandler(auth(cb_regenerate), pattern=r"^regen:\d+$"))
+
+    edit_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(auth(cb_edit_start), pattern=r"^edit:\d+$")],
+        states={
+            WAITING_EDIT_TEXT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, auth(recv_edit_text)),
+            ],
+        },
+        fallbacks=[],
+        per_message=False,
+    )
+    app.add_handler(edit_conv)
+
+
+def moderation_keyboard(post_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Опубликовать", callback_data=f"pub:{post_id}"),
+            InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit:{post_id}"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Перегенерировать", callback_data=f"regen:{post_id}"),
+            InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{post_id}"),
+        ],
+    ])
+
+
+async def cb_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    post_id = int(query.data.split(":")[1])
+    db = _get_db(context)
+    post = await db.get_post(post_id)
+
+    if not post:
+        await query.edit_message_text("Пост не найден.")
+        return
+
+    channel = await db.get_setting("channel_id")
+    if not channel:
+        await query.message.reply_text("Канал не задан! Установите через /settings.")
+        return
+
+    try:
+        if post.get("image_path"):
+            await context.bot.send_photo(
+                chat_id=channel,
+                photo=Path(post["image_path"]),
+                caption=post["text"],
+                parse_mode="HTML",
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=channel,
+                text=post["text"],
+                parse_mode="HTML",
+            )
+    except Exception:
+        logger.exception("Failed to publish post #%d", post_id)
+        await query.message.reply_text("Ошибка публикации. Проверьте, что бот — админ канала.")
+        return
+
+    await db.publish_post(post_id)
+
+    try:
+        await query.edit_message_caption(
+            caption=f"✅ <b>Опубликовано</b>\n\n{post['text']}",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        try:
+            await query.edit_message_text(
+                text=f"✅ <b>Опубликовано</b>\n\n{post['text']}",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+
+    logger.info("Post #%d published to %s", post_id, channel)
+
+
+async def cb_reject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    post_id = int(query.data.split(":")[1])
+    db = _get_db(context)
+
+    await db.reject_post(post_id)
+
+    try:
+        await query.edit_message_caption(
+            caption="❌ <b>Отклонено</b>",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        try:
+            await query.edit_message_text(
+                text="❌ <b>Отклонено</b>",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+
+    logger.info("Post #%d rejected", post_id)
+
+
+async def cb_regenerate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("Перегенерирую…")
+    old_post_id = int(query.data.split(":")[1])
+    db = _get_db(context)
+    openai_client = context.bot_data["openai"]
+
+    await db.reject_post(old_post_id)
+
+    try:
+        await query.edit_message_caption(
+            caption="🔄 Перегенерация…",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        try:
+            await query.edit_message_text("🔄 Перегенерация…", reply_markup=None)
+        except Exception:
+            pass
+
+    try:
+        post_id = await generate_post(db, openai_client)
+    except Exception:
+        logger.exception("Regeneration failed")
+        await query.message.reply_text("Ошибка при перегенерации. Попробуйте /generate.")
+        return
+
+    post = await db.get_post(post_id)
+    if not post:
+        return
+
+    keyboard = moderation_keyboard(post_id)
+
+    if post.get("image_path"):
+        sent = await query.message.reply_photo(
+            photo=Path(post["image_path"]),
+            caption=post["text"],
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    else:
+        sent = await query.message.reply_text(
+            post["text"],
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+
+    await db.update_post(post_id, admin_message_id=sent.message_id)
+
+
+async def cb_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    post_id = int(query.data.split(":")[1])
+    context.user_data["editing_post_id"] = post_id
+    await query.message.reply_text(
+        "Отправьте новый текст поста (HTML-разметка поддерживается):"
+    )
+    return WAITING_EDIT_TEXT
+
+
+async def recv_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    post_id = context.user_data.pop("editing_post_id", None)
+    if post_id is None:
+        await update.message.reply_text("Нет поста для редактирования. Попробуйте /generate.")
+        return ConversationHandler.END
+
+    db = _get_db(context)
+    await db.update_post(post_id, text=update.message.text.strip())
+    post = await db.get_post(post_id)
+    if not post:
+        await update.message.reply_text("Пост не найден.")
+        return ConversationHandler.END
+
+    keyboard = moderation_keyboard(post_id)
+
+    if post.get("image_path"):
+        sent = await update.message.reply_photo(
+            photo=Path(post["image_path"]),
+            caption=post["text"],
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    else:
+        sent = await update.message.reply_text(
+            post["text"],
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+
+    await db.update_post(post_id, admin_message_id=sent.message_id)
+    return ConversationHandler.END
