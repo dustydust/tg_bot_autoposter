@@ -19,9 +19,15 @@ jobs:
             set -e
             REPO="https://github.com/${{ github.repository }}.git"
             DIR="${{ secrets.DEPLOY_PATH }}"
-            if [ ! -d "$DIR/.git" ]; then
+            if [ ! -d "$DIR" ]; then
               mkdir -p "$(dirname "$DIR")"
               git clone "$REPO" "$DIR"
+            elif [ ! -d "$DIR/.git" ]; then
+              cd "$DIR"
+              git init
+              git remote add origin "$REPO" 2>/dev/null || git remote set-url origin "$REPO"
+              git fetch origin main
+              git checkout -B main origin/main
             fi
             cd "$DIR"
             git fetch origin main
