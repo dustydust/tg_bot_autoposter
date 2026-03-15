@@ -17,7 +17,13 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT }}
           script: |
             set -e
-            cd ${{ secrets.DEPLOY_PATH }}
+            REPO="https://github.com/${{ github.repository }}.git"
+            DIR="${{ secrets.DEPLOY_PATH }}"
+            if [ ! -d "$DIR/.git" ]; then
+              mkdir -p "$(dirname "$DIR")"
+              git clone "$REPO" "$DIR"
+            fi
+            cd "$DIR"
             git fetch origin main
             git reset --hard origin/main
             docker compose up -d --build
