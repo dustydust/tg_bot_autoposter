@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from typing import Any
 
@@ -80,6 +81,16 @@ async def generate_text(
     return resp.choices[0].message.content or ""
 
 
+def _fallback_image_prompt(post_text: str, hint: str = "") -> str:
+    """Create a simple DALL-E prompt from post text when GPT returns empty."""
+    # Take first 400 chars, remove HTML for cleaner prompt
+    text = re.sub(r"<[^>]+>", "", post_text)[:400].strip()
+    base = f"Professional abstract illustration for a blog post. Theme: {text}"
+    if hint:
+        base += f". Style: {hint}"
+    return base + "."
+
+
 async def generate_image_prompt(
     client: AsyncOpenAI,
     post_text: str,
@@ -106,7 +117,16 @@ async def generate_image_prompt(
         messages=[{"role": "user", "content": user_msg}],
         max_completion_tokens=256,
     )
-    return (resp.choices[0].message.content or "").strip()
+    result = (resp.choices[0].message.content or "").strip()
+
+
+    if not result:
+        logger.warning(
+            "Empty image prompt from GPT (model=%s). Using fallback from post text.",
+            TEXT_MODEL,
+        )
+        return _fallback_image_prompt(post_text, hint)
+    return result
 
 
 async def generate_image(client: AsyncOpenAI, prompt: str) -> str:
