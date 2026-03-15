@@ -68,7 +68,7 @@ async def generate_text(
         model=TEXT_MODEL,
         messages=messages,  # type: ignore[arg-type]
         temperature=0.85,
-        max_tokens=1024,
+        max_completion_tokens=1024,
     )
     return resp.choices[0].message.content or ""
 
@@ -92,7 +92,7 @@ async def generate_image_prompt(
         model=TEXT_MODEL,
         messages=[{"role": "user", "content": user_msg}],
         temperature=0.7,
-        max_tokens=256,
+        max_completion_tokens=256,
     )
     return (resp.choices[0].message.content or "").strip()
 
