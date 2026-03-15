@@ -5,6 +5,7 @@ data/
 __pycache__/
 *.pyc
 .git/
+.github/
 .vscode/
 .cursor/
 README.md

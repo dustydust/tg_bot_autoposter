@@ -118,6 +118,34 @@ bot/
 - SQLite database and generated images are stored in the `data/` directory
 - When using Docker, `./data` on the host is mounted into the container — all data stays on the host filesystem
 
+## GitHub Actions deployment
+
+On every push to `main`, the workflow deploys to your server via SSH.
+
+### Required secrets (Settings → Secrets and variables → Actions)
+
+| Secret | Description |
+|--------|-------------|
+| `DEPLOY_HOST` | Server IP or hostname |
+| `DEPLOY_USER` | SSH user (e.g. `root`) |
+| `DEPLOY_SSH_KEY` | Private SSH key (full contents of `id_ed25519`) |
+| `DEPLOY_PATH` | Path to project on server (e.g. `/home/user/tg_bot_autoposter`) |
+| `DEPLOY_PORT` | SSH port (e.g. `22`) |
+
+### One-time server setup
+
+```bash
+# On the server
+git clone https://github.com/dustydust/tg_bot_autoposter.git
+cd tg_bot_autoposter
+cp .env.example .env
+# Edit .env with your tokens
+```
+
+After that, each push to `main` will run `git pull` and `docker compose up -d --build` on the server.
+
+---
+
 ## Requirements
 
 - Python 3.12+
