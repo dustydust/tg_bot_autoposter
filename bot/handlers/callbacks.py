@@ -13,7 +13,8 @@ from telegram.ext import (
 )
 
 from bot.database import Database
-from bot.generator import generate_post
+from bot.errors import send_error_to_admins
+from bot.generator import generate_post, regenerate_image
 from bot.handlers.middleware import authorized_only
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ def register(app, allowed_ids: frozenset[int]):
     app.add_handler(CallbackQueryHandler(auth(cb_publish), pattern=r"^pub:\d+$"))
     app.add_handler(CallbackQueryHandler(auth(cb_reject), pattern=r"^reject:\d+$"))
     app.add_handler(CallbackQueryHandler(auth(cb_regenerate), pattern=r"^regen:\d+$"))
+    app.add_handler(CallbackQueryHandler(auth(cb_regen_image), pattern=r"^regenimg:\d+$"))
 
     edit_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(auth(cb_edit_start), pattern=r"^edit:\d+$")],
@@ -41,7 +43,7 @@ def register(app, allowed_ids: frozenset[int]):
             ],
         },
         fallbacks=[],
-        per_message=False,
+        per_message=True,
     )
     app.add_handler(edit_conv)
 
@@ -53,9 +55,10 @@ def moderation_keyboard(post_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit:{post_id}"),
         ],
         [
-            InlineKeyboardButton("🔄 Перегенерировать", callback_data=f"regen:{post_id}"),
-            InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{post_id}"),
+            InlineKeyboardButton("🔄 Перегенерировать пост", callback_data=f"regen:{post_id}"),
+            InlineKeyboardButton("🖼️ Перегенерировать картинку", callback_data=f"regenimg:{post_id}"),
         ],
+        [InlineKeyboardButton("❌ Отклонить", callback_data=f"reject:{post_id}")],
     ])
 
 
@@ -89,9 +92,10 @@ async def cb_publish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 text=post["text"],
                 parse_mode="HTML",
             )
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to publish post #%d", post_id)
-        await query.message.reply_text("Ошибка публикации. Проверьте, что бот — админ канала.")
+        await send_error_to_admins(context.application, e, prefix="❌ Ошибка публикации:\n\n")
+        await query.message.reply_text("Ошибка публикации. Подробности отправлены админам.")
         return
 
     await db.publish_post(post_id)
@@ -165,9 +169,10 @@ async def cb_regenerate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         post_id = await generate_post(db, openai_client)
-    except Exception:
+    except Exception as e:
         logger.exception("Regeneration failed")
-        await query.message.reply_text("Ошибка при перегенерации. Попробуйте /generate.")
+        await send_error_to_admins(context.application, e, prefix="❌ Ошибка перегенерации:\n\n")
+        await query.message.reply_text("Ошибка при перегенерации. Подробности отправлены админам.")
         return
 
     post = await db.get_post(post_id)
@@ -190,6 +195,54 @@ async def cb_regenerate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             reply_markup=keyboard,
         )
 
+    await db.update_post(post_id, admin_message_id=sent.message_id)
+
+
+async def cb_regen_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("Перегенерирую картинку…")
+    post_id = int(query.data.split(":")[1])
+    db = _get_db(context)
+    openai_client = context.bot_data["openai"]
+    post = await db.get_post(post_id)
+
+    if not post:
+        await query.message.reply_text("Пост не найден.")
+        return
+
+    try:
+        await query.edit_message_caption(
+            caption="🖼️ Перегенерация картинки…",
+            parse_mode="HTML",
+            reply_markup=None,
+        )
+    except Exception:
+        try:
+            await query.edit_message_text("🖼️ Перегенерация картинки…", reply_markup=None)
+        except Exception:
+            pass
+
+    try:
+        settings = await db.get_all_settings()
+        new_image_path = await regenerate_image(
+            openai_client, post["text"], settings
+        )
+        await db.update_post(post_id, image_path=new_image_path)
+    except Exception as e:
+        logger.exception("Image regeneration failed for post #%d", post_id)
+        await send_error_to_admins(context.application, e, prefix="❌ Ошибка перегенерации картинки:\n\n")
+        await query.message.reply_text("Ошибка при перегенерации картинки. Подробности отправлены админам.")
+        return
+
+    post = await db.get_post(post_id)
+    keyboard = moderation_keyboard(post_id)
+
+    sent = await query.message.reply_photo(
+        photo=Path(post["image_path"]),
+        caption=post["text"],
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
     await db.update_post(post_id, admin_message_id=sent.message_id)
 
 

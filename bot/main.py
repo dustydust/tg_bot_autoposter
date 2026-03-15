@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 
 from openai import AsyncOpenAI
-from telegram.ext import ApplicationBuilder
+from telegram.ext import ApplicationBuilder, ContextTypes
 
 from bot.config import Config
 from bot.database import Database
+from bot.errors import send_error_to_admins
 from bot.handlers import callbacks, commands
 from bot.scheduler import schedule_jobs
 
@@ -24,6 +25,14 @@ async def post_init(app) -> None:
     await db.init_defaults(cfg)
     await schedule_jobs(app)
     logger.info("Bot initialized, DB ready, scheduler running")
+
+
+async def _error_handler(
+    update: object, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Send all uncaught errors to admins."""
+    logger.exception("Unhandled exception", exc_info=context.error)
+    await send_error_to_admins(context.application, context.error)
 
 
 async def post_shutdown(app) -> None:
@@ -52,6 +61,7 @@ def main() -> None:
 
     commands.register(app, cfg.allowed_user_ids)
     callbacks.register(app, cfg.allowed_user_ids)
+    app.add_error_handler(_error_handler)
 
     logger.info("Starting bot…")
     app.run_polling(drop_pending_updates=True)

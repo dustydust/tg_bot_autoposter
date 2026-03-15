@@ -50,6 +50,8 @@ DEFAULT_SCHEDULE=0 9,18 * * *
 
 - `ALLOWED_USER_IDS` — comma-separated list of Telegram user IDs that can control the bot
 - `DEFAULT_SCHEDULE` — cron expression (minute hour day month weekday). `0 9,18 * * *` = 09:00 and 18:00 daily
+- `OPENAI_TEXT_MODEL` — model for text generation (default: `gpt-4o`)
+- `OPENAI_IMAGE_MODEL` — model for image generation (default: `dall-e-3`)
 
 ### 5. Run with Docker
 
@@ -58,6 +60,14 @@ docker compose up -d
 ```
 
 That's it. The bot is running.
+
+### 5a. Docker for local development
+
+Uses a volume mount so code changes apply without rebuilding:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
 
 ### 5b. Run without Docker (development)
 

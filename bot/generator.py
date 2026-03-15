@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from typing import Any
 
@@ -12,8 +13,8 @@ from bot.database import Database
 
 logger = logging.getLogger(__name__)
 
-TEXT_MODEL = "gpt-4o"
-IMAGE_MODEL = "dall-e-3"
+TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o")
+IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "dall-e-3")
 
 
 def _build_system_prompt(settings: dict[str, str]) -> str:
@@ -118,6 +119,18 @@ async def download_image(url: str) -> str:
         path.write_bytes(r.content)
     logger.info("Image saved to %s", path)
     return str(path)
+
+
+async def regenerate_image(
+    client: AsyncOpenAI,
+    post_text: str,
+    settings: dict[str, str],
+) -> str:
+    """Regenerate only the image for an existing post. Returns new image path."""
+    image_prompt = await generate_image_prompt(client, post_text, settings)
+    logger.info("Regenerated image prompt: %s", image_prompt[:120])
+    image_url = await generate_image(client, image_prompt)
+    return await download_image(image_url)
 
 
 async def generate_post(db: Database, client: AsyncOpenAI) -> int:

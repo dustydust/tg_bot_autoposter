@@ -1,0 +1,12 @@
+# Local development: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  bot:
+    build: .
+    env_file: .env
+    command: ["sh", "-c", "watchfiles --filter python 'python -m bot.main' /app/bot"]
+    volumes:
+      - ./data:/app/data
+      - ./bot:/app/bot
+    restart: "no"
+    environment:
+      - PYTHONUNBUFFERED=1

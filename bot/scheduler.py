@@ -6,6 +6,7 @@ from pathlib import Path
 from telegram.ext import Application, ContextTypes
 
 from bot.database import Database
+from bot.errors import send_error_to_admins
 from bot.generator import generate_post
 from bot.handlers.callbacks import moderation_keyboard
 
@@ -43,13 +44,9 @@ async def _scheduled_generate(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         post_id = await generate_post(db, openai_client)
-    except Exception:
+    except Exception as e:
         logger.exception("Scheduled generation failed")
-        for uid in allowed_ids:
-            try:
-                await context.bot.send_message(uid, "⚠️ Автоматическая генерация не удалась. Попробуйте /generate вручную.")
-            except Exception:
-                pass
+        await send_error_to_admins(context.application, e, prefix="⚠️ Ошибка автогенерации:\n\n")
         return
 
     post = await db.get_post(post_id)
@@ -99,9 +96,9 @@ async def schedule_jobs(app: Application) -> None:
 
     app.job_queue.run_custom(
         callback=_scheduled_generate,
+        name=JOB_NAME,
         job_kwargs={
             "trigger": "cron",
-            "name": JOB_NAME,
             **cron,
         },
     )

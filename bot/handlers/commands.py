@@ -15,6 +15,7 @@ from telegram.ext import (
 )
 
 from bot.database import Database
+from bot.errors import send_error_to_admins
 from bot.generator import generate_post
 from bot.handlers.middleware import authorized_only
 
@@ -101,9 +102,10 @@ async def cmd_generate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     try:
         post_id = await generate_post(db, openai_client)
-    except Exception:
+    except Exception as e:
         logger.exception("Post generation failed")
-        await msg.edit_text("Ошибка при генерации поста. Попробуйте ещё раз.")
+        await send_error_to_admins(context.application, e, prefix="❌ Ошибка генерации:\n\n")
+        await msg.edit_text("❌ Ошибка при генерации. Подробности отправлены всем админам.")
         return
 
     post = await db.get_post(post_id)
