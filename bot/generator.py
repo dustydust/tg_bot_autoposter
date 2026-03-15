@@ -64,6 +64,14 @@ async def generate_text(
         "content": "Write a new, original post for the channel.",
     })
 
+    logger.info(
+        "--- OpenAI text request --- model=%s | system=%d chars | messages=%d",
+        TEXT_MODEL, len(system), len(messages),
+    )
+    logger.info("System prompt: %s", system[:500] + ("..." if len(system) > 500 else ""))
+    if context:
+        logger.info("Context (recent posts): %s", context[:500] + ("..." if len(context) > 500 else ""))
+
     resp = await client.chat.completions.create(
         model=TEXT_MODEL,
         messages=messages,  # type: ignore[arg-type]
@@ -87,6 +95,12 @@ async def generate_image_prompt(
     if hint:
         user_msg += f"\n\nPreferred visual style: {hint}"
 
+    logger.info(
+        "--- OpenAI image prompt request --- model=%s | post=%d chars",
+        TEXT_MODEL, len(post_text),
+    )
+    logger.info("Image prompt request: %s", user_msg[:600] + ("..." if len(user_msg) > 600 else ""))
+
     resp = await client.chat.completions.create(
         model=TEXT_MODEL,
         messages=[{"role": "user", "content": user_msg}],
@@ -100,6 +114,10 @@ async def generate_image(client: AsyncOpenAI, prompt: str) -> str:
     if not (prompt and prompt.strip()):
         prompt = "A professional abstract illustration suitable for a blog post"
         logger.warning("Empty image prompt, using fallback")
+    logger.info(
+        "--- OpenAI DALL-E request --- model=%s | prompt=%s",
+        IMAGE_MODEL, prompt[:600] + ("..." if len(prompt) > 600 else ""),
+    )
     resp = await client.images.generate(
         model=IMAGE_MODEL,
         prompt=prompt,
